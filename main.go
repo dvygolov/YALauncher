@@ -503,10 +503,19 @@ func (a *App) recordLaunch(it *index.Item) {
 	key := it.Key()
 	a.frequent.Hit(key, time.Now().Unix())
 	a.cfg.Frequent = *a.frequent
-	a.cfg.History = append([]string{key}, a.cfg.History...)
-	if len(a.cfg.History) > 40 {
-		a.cfg.History = a.cfg.History[:40]
+	// The history is a most-recently-used list: the program moves to the
+	// front instead of appearing every time it is started.
+	hist := make([]string, 0, len(a.cfg.History)+1)
+	hist = append(hist, key)
+	for _, k := range a.cfg.History {
+		if k != key {
+			hist = append(hist, k)
+		}
 	}
+	if len(hist) > 40 {
+		hist = hist[:40]
+	}
+	a.cfg.History = hist
 	a.pendingSave.Store(true)
 	go a.saveConfig()
 }
