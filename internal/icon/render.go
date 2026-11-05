@@ -87,11 +87,13 @@ func Render(size int) *image.RGBA {
 			if a <= 0.0001 {
 				continue
 			}
+			// sample() returns channel values normalised to 0..1; the colour
+			// type wants 0..255, so the un-premultiplied average is scaled.
 			img.SetRGBA(x, y, color.RGBA{
-				R: clamp8(r / a),
-				G: clamp8(g / a),
-				B: clamp8(b / a),
-				A: clamp8(a),
+				R: clamp8(r / a * 255),
+				G: clamp8(g / a * 255),
+				B: clamp8(b / a * 255),
+				A: clamp8(a * 255),
 			})
 		}
 	}
