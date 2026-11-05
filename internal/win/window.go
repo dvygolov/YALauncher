@@ -253,6 +253,13 @@ func InvalidateRect(h HWND, r *RECT, erase bool) {
 	pInvalidateRect.Call(uintptr(h), p, e)
 }
 
+// GetWindowRectOf returns the outer rectangle of a window in screen pixels.
+func GetWindowRectOf(h HWND) RECT {
+	var r RECT
+	pGetWindowRect.Call(uintptr(h), uintptr(unsafe.Pointer(&r)))
+	return r
+}
+
 func GetClientRect(h HWND) RECT {
 	var r RECT
 	pGetClientRect.Call(uintptr(h), uintptr(unsafe.Pointer(&r)))

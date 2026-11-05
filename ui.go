@@ -192,14 +192,14 @@ func (u *UI) scale(v int32) int32 {
 // contentHeight is the height the window wants for the current row count,
 // capped by the work area so the list never spills over the taskbar.
 func (u *UI) contentHeight() int32 {
+	// With no matches the field stands alone; a row is never invented just to
+	// fill the window.
+	h := u.scale(uiFieldHeight + uiPadding)
 	n := len(u.rows)
-	if n == 0 {
-		n = 1
-	}
 	if n > uiMaxRows {
 		n = uiMaxRows
 	}
-	h := u.scale(uiFieldHeight+uiPadding) + int32(n)*u.scale(uiRowHeight)
+	h += int32(n) * u.scale(uiRowHeight)
 	if foot := u.footerHeight(); foot > 0 {
 		h += foot
 	}
@@ -234,19 +234,10 @@ func (u *UI) resizeToContent() {
 }
 
 func (u *UI) place() {
-	// GetMonitorInfo answers in virtualised (logical) pixels on this desktop
-	// even though the process is per-monitor DPI aware, while SetWindowPos
-	// takes physical pixels - the two differ by the monitor scale. The width
-	// and height are already physical, so the work rectangle is brought to
-	// the same units before the centring arithmetic.
+	// A per-monitor aware process gets physical pixels from GetMonitorInfo and
+	// passes physical pixels to SetWindowPos, so the work area is used as is;
+	// the monitor's DPI only scales the design sizes (u.width, u.height).
 	work := u.monitor.Work
-	if s := float64(u.dpi) / 96.0; s > 1.001 {
-		work = win.Rect(
-			int32(math.Round(float64(work.Left)/s)),
-			int32(math.Round(float64(work.Top)/s)),
-			int32(math.Round(float64(work.Right)/s)),
-			int32(math.Round(float64(work.Bottom)/s)))
-	}
 	x := work.Left + (work.Width()-u.width)/2
 	y := work.Top + (work.Height()-u.height)/2
 	if y < work.Top+u.scale(10) {
@@ -287,7 +278,9 @@ func (u *UI) refreshRows(resetSelection bool) {
 	u.errText = ""
 
 	if q == "" {
-		u.rows = u.historyRows()
+		// An empty query is just the input line: no list, no history preview.
+		// The history still ranks the results once the user types.
+		u.rows = nil
 		if resetSelection {
 			u.sel = 0
 			u.scroll = 0
@@ -340,26 +333,6 @@ func (u *UI) rowForItem(it *index.Item) *Row {
 		sub = it.Description + "  ·  " + sub
 	}
 	return &Row{Title: it.Name, Sub: sub, Item: it, Icon: u.iconFor(it)}
-}
-
-func (u *UI) historyRows() []*Row {
-	keys := u.app.recentKeys(uiMaxRows)
-	ix := u.app.snapshot()
-	rows := make([]*Row, 0, len(keys))
-	for _, k := range keys {
-		if it := ix.ByKey(k); it != nil {
-			rows = append(rows, u.rowForItem(it))
-		}
-	}
-	if len(rows) > 0 {
-		return rows
-	}
-	// Nothing launched yet: offer the few entries every start menu has, so
-	// the first impression is a list and not an empty box.
-	for _, it := range ix.Search(index.Query{Text: "explorer", Limit: 3, Frequent: u.app.frequent}) {
-		rows = append(rows, u.rowForItem(it))
-	}
-	return rows
 }
 
 // glyphIcon renders a short text glyph into an icon slot.
@@ -421,9 +394,8 @@ func (u *UI) wndProc(h win.HWND, msg uint32, wp, lp uintptr) uintptr {
 		// hotkey and Esc instead.
 		return 0
 	case win.WM_DPICHANGED:
-		// Windows sends a suggested rectangle for the new DPI. Re-running the
-		// normal layout keeps the preferred 660 unit width and re-centres on
-		// the monitor the window is now on.
+		// Windows moved the window to a monitor with another scale. The sizes
+		// are rebuilt for the new DPI and the window is re-centred there.
 		u.dpi = uint32(uint16(wp))
 		u.rebuildFonts()
 		if m, ok := win.MonitorInfo(win.MonitorFromWindow(h)); ok {
@@ -758,12 +730,9 @@ func shortenPath(p string) string {
 // take the real focus.
 func (u *UI) onKeyMessage(vk uint32, ctrl, shift, _ bool) {
 	if vk == win.VK_ESCAPE {
-		if u.text() != "" {
-			u.setQuery("")
-			u.resizeToContent()
-		} else {
-			u.app.post(umHide, 0, 0)
-		}
+		// Esc closes the launcher outright; clearing the query is what
+		// Backspace is for.
+		u.app.post(umHide, 0, 0)
 		return
 	}
 	if vk == win.VK_BACK {

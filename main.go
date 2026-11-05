@@ -36,6 +36,7 @@ const (
 	umReindex    = win.WM_APP + 4
 	umHide       = win.WM_APP + 5
 	umKey        = win.WM_APP + 6
+	umClickAway  = win.WM_APP + 7
 	umUpdateOK   = win.WM_APP + 11
 	umUpdateFail = win.WM_APP + 12
 
@@ -188,6 +189,9 @@ func (a *App) run() {
 
 	a.tray = win.NewTray(a.hwnd, icon, a.trayTip(), umTray)
 	a.installHotkey()
+	if err := win.InstallMouseHook(a.onMouse); err != nil {
+		logf("hook: WH_MOUSE_LL failed: %v", err)
+	}
 	a.syncAutostart()
 	cleanupOldBinary()
 
@@ -252,6 +256,9 @@ func (a *App) wndProc(h win.HWND, msg uint32, wp, lp uintptr) uintptr {
 			a.ui.hide()
 		}
 		return 0
+	case umClickAway:
+		a.clickAway(int32(uint32(wp)), int32(uint32(wp>>32)))
+		return 0
 	case umKey:
 		if a.ui != nil {
 			a.ui.onKeyMessage(uint32(wp), lp&1 != 0, lp&4 != 0, lp&2 != 0)
@@ -301,6 +308,7 @@ func (a *App) wndProc(h win.HWND, msg uint32, wp, lp uintptr) uintptr {
 		return 0
 
 	case win.WM_DESTROY:
+		win.RemoveMouseHook()
 		win.KillTimer(h, timerTray)
 		win.KillTimer(h, timerUpdate)
 		win.KillTimer(h, timerReindex)
@@ -423,6 +431,28 @@ func boolWord(any, shift bool) uintptr {
 	return v
 }
 
+// onMouse runs inside the mouse hook and hides the launcher when a click
+// lands outside its window - the "click away to dismiss" every quick launcher
+// has. The rect check is done on the message thread through umClickAway so no
+// window call happens on the input path.
+func (a *App) onMouse(ev win.MouseEvent) {
+	if !a.keysToUI.Load() || !ev.Down {
+		return
+	}
+	a.post(umClickAway, uintptr(uint32(ev.X))|uintptr(uint32(ev.Y))<<32, 0)
+}
+
+func (a *App) clickAway(x, y int32) {
+	if a.ui == nil || a.ui.hwnd == 0 {
+		return
+	}
+	r := win.GetWindowRectOf(a.ui.hwnd)
+	if x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom {
+		return // inside the launcher: the window handles it itself
+	}
+	a.ui.hide()
+}
+
 // ---- index -----------------------------------------------------------------
 
 func (a *App) snapshot() *index.Index {
@@ -518,22 +548,6 @@ func (a *App) recordLaunch(it *index.Item) {
 	a.cfg.History = hist
 	a.pendingSave.Store(true)
 	go a.saveConfig()
-}
-
-func (a *App) recentKeys(limit int) []string {
-	out := make([]string, 0, limit)
-	seen := map[string]bool{}
-	for _, k := range a.cfg.History {
-		if seen[k] {
-			continue
-		}
-		seen[k] = true
-		out = append(out, k)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
 }
 
 func (a *App) copyText(text string) { copyText(text) }

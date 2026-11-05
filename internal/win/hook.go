@@ -147,3 +147,67 @@ func KeyboardLayouts() []uintptr {
 func PrimaryLanguage(hkl uintptr) uint32 {
 	return uint32(hkl) & 0x3FF
 }
+
+// ---- mouse hook ------------------------------------------------------------
+//
+// A low level mouse hook watches for the click that dismisses the launcher:
+// the window never has to own the focus for that, which is exactly the
+// situation the keyboard input is designed around as well.
+
+const WH_MOUSE_LL = 14
+
+// MouseEvent is a normalised mouse event from the hook.
+type MouseEvent struct {
+	X, Y int32
+	Down bool
+}
+
+var (
+	mouseHandler  func(MouseEvent)
+	mouseHookCB   = syscall.NewCallback(mouseProc)
+	mouseHookInst HANDLE
+)
+
+type MSLLHOOKSTRUCT struct {
+	X, Y  int32
+	_     uint32 // mouse data (hi/lo words depend on the message)
+	Flags uint32
+	Time  uint32
+	Extra uintptr
+}
+
+func mouseProc(nCode int32, wparam, lparam uintptr) uintptr {
+	if nCode == HC_ACTION && mouseHandler != nil {
+		const wmLDown, wmRDown, wmMDown = 0x201, 0x204, 0x207
+		down := wparam == wmLDown || wparam == wmRDown || wparam == wmMDown
+		if down {
+			m := (*MSLLHOOKSTRUCT)(unsafe.Pointer(lparam))
+			mouseHandler(MouseEvent{X: m.X, Y: m.Y, Down: true})
+		}
+	}
+	r, _, _ := pCallNextHookEx.Call(uintptr(mouseHookInst), uintptr(nCode), wparam, lparam)
+	return r
+}
+
+// InstallMouseHook installs a global WH_MOUSE_LL observer. It must be called
+// from the thread that runs the message loop.
+func InstallMouseHook(handler func(MouseEvent)) error {
+	mouseHandler = handler
+	h, _, e := pSetWindowsHookExW.Call(WH_MOUSE_LL, mouseHookCB, uintptr(ModuleHandle()), 0)
+	if h == 0 {
+		if errno, ok := e.(syscall.Errno); ok && errno != 0 {
+			return errno
+		}
+		return syscall.EINVAL
+	}
+	mouseHookInst = HANDLE(h)
+	return nil
+}
+
+func RemoveMouseHook() {
+	if mouseHookInst != 0 {
+		pUnhookWindowsHookEx.Call(uintptr(mouseHookInst))
+		mouseHookInst = 0
+	}
+	mouseHandler = nil
+}
