@@ -63,8 +63,10 @@ type Config struct {
 
 func defaultConfig() Config {
 	return Config{
-		Hotkey:           "ctrl+alt+space",
-		Folders:          []string{},
+		Hotkey: "ctrl+alt+space",
+		// The portable tools folder is indexed by default: this launcher is
+		// meant to find what lives in D:\YandexDisk\Tools too.
+		Folders:          []string{`D:\YandexDisk\Tools`},
 		StartMenu:        true,
 		AppPaths:         true,
 		EnvPath:          false,
