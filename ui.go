@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/dvygolov/yalauncher/internal/index"
 	"github.com/dvygolov/yalauncher/internal/win"
@@ -25,7 +24,7 @@ const msgRows = win.WM_APP + 50
 
 const (
 	uiPadding     = 18 // outer margin inside the window, 96 dpi units
-	uiRowHeight   = 46
+	uiRowHeight   = 60
 	uiFieldHeight = 72
 	uiIconSize    = 28
 	uiMaxRows     = 9
@@ -91,6 +90,7 @@ type UI struct {
 	monitor     win.Monitor
 	hoverRow    int
 	mouseInside bool
+	caretOn     bool
 }
 
 func newUI(app *App) *UI {
@@ -172,10 +172,13 @@ func (u *UI) show() {
 	win.EnsureForeground(u.hwnd)
 	win.InvalidateRect(u.hwnd, nil, false)
 	win.UpdateWindow(u.hwnd)
+	u.caretOn = true
+	win.SetTimer(u.hwnd, timerBlink, 530)
 }
 
 func (u *UI) hide() {
 	if u.hwnd != 0 {
+		win.KillTimer(u.hwnd, timerBlink)
 		win.ShowWindow(u.hwnd, win.SW_HIDE)
 		u.app.keysToUI.Store(false)
 	}
@@ -381,6 +384,11 @@ func (u *UI) wndProc(h win.HWND, msg uint32, wp, lp uintptr) uintptr {
 		win.InvalidateRect(h, nil, false)
 		return 0
 	case win.WM_TIMER:
+		if wp == timerBlink {
+			u.caretOn = !u.caretOn
+			win.InvalidateRect(h, nil, false)
+			return 0
+		}
 		if wp == timerFlash {
 			win.KillTimer(h, timerFlash)
 			u.errText = ""
@@ -571,6 +579,9 @@ func (u *UI) paintQuery(dc win.HDC, r win.RECT) {
 	width := r.Right - r.Left - u.scale(28)
 	if text == "" {
 		win.Text(dc, "Поиск программы или вычисление…", x, top, u.fontQuery, colDim, win.DT_LEFT, width)
+		if u.caretOn {
+			win.SolidRect(dc, win.Rect(x+u.scale(2), r.Top+u.scale(12), x+u.scale(4), r.Bottom-u.scale(12)), colAccent)
+		}
 		return
 	}
 	win.Text(dc, text, x, top, u.fontQuery, colText, win.DT_LEFT, width)
@@ -578,9 +589,8 @@ func (u *UI) paintQuery(dc win.HDC, r win.RECT) {
 	if w > width {
 		w = width
 	}
-	if time.Now().UnixMilli()/530%2 == 0 {
-		caret := win.Rect(x+w+u.scale(2), r.Top+u.scale(12), x+w+u.scale(4), r.Bottom-u.scale(12))
-		win.SolidRect(dc, caret, colAccent)
+	if u.caretOn {
+		win.SolidRect(dc, win.Rect(x+w+u.scale(2), r.Top+u.scale(12), x+w+u.scale(4), r.Bottom-u.scale(12)), colAccent)
 	}
 }
 
@@ -610,12 +620,17 @@ func (u *UI) paintRows(dc win.HDC, top, right, bottom int32) {
 		textX := iconX + iconSize + u.scale(14)
 		width := right - pad - u.scale(14) - textX
 		titleH := win.TextHeight(dc, u.fontTitle)
-		subH := int32(0)
-		if row.Sub != "" {
-			subH = win.TextHeight(dc, u.fontSub)
+		subH := win.TextHeight(dc, u.fontSub)
+		gap := u.scale(6)
+		// The two lines are measured with the real GDI metrics and placed
+		// together: title on top, the path under it with a visible gap, so the
+		// descenders of the title never touch the ascenders of the path.
+		block := titleH + gap + subH
+		if block > rowH {
+			// Never let the text escape the row: shrink the block rather than
+			// overlap into the next row.
+			block = rowH
 		}
-		gap := u.scale(1)
-		block := titleH + subH + gap
 		titleTop := y + (rowH-block)/2
 		win.Text(dc, row.Title, textX, titleTop, u.fontTitle, colText, win.DT_LEFT, width)
 		if row.Sub != "" {

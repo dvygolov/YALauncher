@@ -45,7 +45,7 @@ const (
 	timerUpdate  = 2
 	timerReindex = 3
 	timerFlash   = 4
-	timerCaret   = 5
+	timerBlink   = 5
 
 	// tray menu commands
 	cmdShow       = 101
