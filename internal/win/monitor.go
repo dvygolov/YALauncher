@@ -89,6 +89,24 @@ func DPIForWindow(h HWND) uint32 {
 	return 96
 }
 
+// DPIForMonitor returns the effective DPI of a specific display. The window's
+// own DPI is useless for layout before the window has been moved there, so the
+// launcher asks the monitor under the cursor instead.
+func DPIForMonitor(h HMONITOR, fallback uint32) uint32 {
+	if h == 0 || pGetDpiForMonitor.Find() != nil {
+		return fallback
+	}
+	var dpiX, dpiY uint32
+	if r, _, _ := pGetDpiForMonitor.Call(uintptr(h), MDT_EFFECTIVE_DPI,
+		uintptr(unsafe.Pointer(&dpiX)), uintptr(unsafe.Pointer(&dpiY))); r != 0 {
+		return fallback
+	}
+	if dpiX < 48 || dpiX > 480 {
+		return fallback
+	}
+	return dpiX
+}
+
 // SystemDPI returns the DPI of the primary display.
 func SystemDPI() uint32 {
 	if pGetSystemDpiForProc.Find() == nil {

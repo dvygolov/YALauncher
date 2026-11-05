@@ -143,15 +143,21 @@ func (u *UI) show() {
 	}
 
 	pt := win.CursorPos()
+	winDpi := win.DPIForWindow(u.hwnd)
+	if winDpi == 0 {
+		winDpi = win.SystemDPI()
+	}
 	if m, ok := win.MonitorInfo(win.MonitorFromPoint(pt)); ok {
 		u.monitor = m
-	}
-	u.dpi = win.DPIForWindow(u.hwnd)
-	if u.dpi == 0 {
-		u.dpi = win.SystemDPI()
+		// The window's DPI still describes the monitor it was left on, but the
+		// launcher is about to move to the one under the cursor: the scaling of
+		// that monitor is what the sizes and the position have to use.
+		u.dpi = win.DPIForMonitor(m.Handle, winDpi)
+	} else {
+		u.dpi = winDpi
 	}
 	u.rebuildFonts()
-	work := physicalRect(u.monitor.Work, u.dpi)
+	work := u.monitor.Work
 	u.width = u.scale(660)
 	if work.Width() < u.width+u.scale(40) {
 		u.width = work.Width() - u.scale(40)
@@ -197,7 +203,7 @@ func (u *UI) contentHeight() int32 {
 	if foot := u.footerHeight(); foot > 0 {
 		h += foot
 	}
-	if maxH := physicalRect(u.monitor.Work, u.dpi).Height() - u.scale(40); h > maxH {
+	if maxH := u.monitor.Work.Height() - u.scale(40); h > maxH {
 		h = maxH
 	}
 	return h
@@ -227,27 +233,22 @@ func (u *UI) resizeToContent() {
 	u.place()
 }
 
-// physical converts a rectangle reported by a 96 dpi virtualised call into the
-// physical pixels SetWindowPos and the monitor use in a per-monitor aware
-// process. The scale goes both ways depending on the session: GetMonitorInfo
-// here reports a 1920 wide work area for a 1280 wide panel, i.e. logical
-// units, and the process's DPI tells by how much.
-func physicalRect(r win.RECT, dpi uint32) win.RECT {
-	if dpi == 0 || dpi == 96 {
-		return r
-	}
-	s := float64(dpi) / 96.0
-	return win.Rect(
-		int32(math.Round(float64(r.Left)/s)),
-		int32(math.Round(float64(r.Top)/s)),
-		int32(math.Round(float64(r.Right)/s)),
-		int32(math.Round(float64(r.Bottom)/s)))
-}
-
 func (u *UI) place() {
-	work := physicalRect(u.monitor.Work, u.dpi)
+	// GetMonitorInfo answers in virtualised (logical) pixels on this desktop
+	// even though the process is per-monitor DPI aware, while SetWindowPos
+	// takes physical pixels - the two differ by the monitor scale. The width
+	// and height are already physical, so the work rectangle is brought to
+	// the same units before the centring arithmetic.
+	work := u.monitor.Work
+	if s := float64(u.dpi) / 96.0; s > 1.001 {
+		work = win.Rect(
+			int32(math.Round(float64(work.Left)/s)),
+			int32(math.Round(float64(work.Top)/s)),
+			int32(math.Round(float64(work.Right)/s)),
+			int32(math.Round(float64(work.Bottom)/s)))
+	}
 	x := work.Left + (work.Width()-u.width)/2
-	y := work.Top + work.Height()/3 - u.height/2
+	y := work.Top + (work.Height()-u.height)/2
 	if y < work.Top+u.scale(10) {
 		y = work.Top + u.scale(10)
 	}
@@ -428,7 +429,7 @@ func (u *UI) wndProc(h win.HWND, msg uint32, wp, lp uintptr) uintptr {
 		if m, ok := win.MonitorInfo(win.MonitorFromWindow(h)); ok {
 			u.monitor = m
 		}
-		work := physicalRect(u.monitor.Work, u.dpi)
+		work := u.monitor.Work
 		u.width = u.scale(660)
 		if work.Width() < u.width+u.scale(40) {
 			u.width = work.Width() - u.scale(40)
