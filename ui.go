@@ -942,8 +942,8 @@ func (u *UI) paintScrollbar(dc win.HDC, top, right, bottom int32) {
 	win.SolidRect(dc, win.Rect(x, thumbY, x+u.scale(3), thumbY+thumbH), colDim)
 }
 
-// onRightClick opens the folder that contains the program (or the shortcut)
-// under the cursor, selecting the file in Explorer, then closes the launcher.
+// onRightClick shows a small context menu for the result under the cursor.
+// "Открыть папку" selects the program in Explorer and closes the launcher.
 func (u *UI) onRightClick(lp uintptr) {
 	y := int32(int16(uint32(lp >> 16)))
 	row := u.rowAt(y)
@@ -954,8 +954,13 @@ func (u *UI) onRightClick(lp uintptr) {
 	if r.Item == nil {
 		return
 	}
-	win.ShowInFolder(r.Item.Path)
-	u.app.post(umHide, 0, 0)
+	m := win.NewPopupMenu()
+	defer m.Destroy()
+	m.Add(1, "Открыть папку", false)
+	if m.Track(u.hwnd) == 1 {
+		win.ShowInFolder(r.Item.Path)
+		u.app.post(umHide, 0, 0)
+	}
 }
 
 // paintTooltip draws a floating tooltip next to the mouse cursor with the full
@@ -971,23 +976,20 @@ func (u *UI) paintTooltip(dc win.HDC, right, bottom int32) {
 	}
 	text := r.Item.Path
 	pad := u.scale(uiPadding)
-	maxW := right - pad*2 - u.mouseX - u.scale(20)
-	if maxW < u.scale(200) {
-		maxW = u.scale(200)
+	lineH := win.TextHeight(dc, u.fontSub)
+	if lineH <= 0 {
+		lineH = u.scale(14)
 	}
-	if maxW > u.scale(520) {
-		maxW = u.scale(520)
+	boxW := right - pad*2
+	if boxW < u.scale(180) {
+		boxW = u.scale(180)
 	}
-	textW := win.TextWidth(dc, text, u.fontSub)
-	boxW := maxW
-	if textW+u.scale(20) < boxW {
-		boxW = textW + u.scale(20)
-	}
-	lines := 1
-	if textW > maxW-u.scale(20) {
-		lines = 2
-	}
-	boxH := u.scale(24) * int32(lines)
+	// DrawTextW only wraps on spaces, and a path has none: the line breaks are
+	// inserted here, preferring the backslash right before the point where the
+	// next character would no longer fit.
+	wrapped := wrapPathToWidth(dc, text, u.fontSub, boxW-u.scale(20))
+	lines := strings.Count(wrapped, "\n") + 1
+	boxH := lineH*int32(lines) + u.scale(12)
 	x := u.mouseX + u.scale(12)
 	y := u.mouseY + u.scale(18)
 	if x+boxW > right-pad {
@@ -1004,6 +1006,36 @@ func (u *UI) paintTooltip(dc win.HDC, right, bottom int32) {
 	}
 	win.SolidRect(dc, win.Rect(x, y, x+boxW, y+boxH), colField)
 	win.SolidRect(dc, win.Rect(x, y, x+u.scale(2), y+boxH), colSelBar)
-	tr := win.Rect(x+u.scale(10), y+u.scale(4), x+boxW-u.scale(8), y+boxH)
-	win.TextWrapped(dc, text, &tr, u.fontSub, colText)
+	tr := win.Rect(x+u.scale(10), y+u.scale(6), x+boxW-u.scale(8), y+boxH-u.scale(4))
+	win.TextWrapped(dc, wrapped, &tr, u.fontSub, colText)
+}
+
+// wrapPathToWidth inserts newlines into a path so that every line fits the
+// given pixel width. DrawTextW cannot wrap on backslashes on its own (it only
+// breaks on spaces), so the breaks are computed here.
+func wrapPathToWidth(dc win.HDC, path string, font win.HFONT, maxW int32) string {
+	if win.TextWidth(dc, path, font) <= maxW {
+		return path
+	}
+	var lines []string
+	cur := ""
+	for _, r := range path {
+		candidate := cur + string(r)
+		if cur != "" && win.TextWidth(dc, candidate, font) > maxW {
+			// Try to break at the last backslash for a cleaner split.
+			idx := strings.LastIndex(cur, `\`)
+			if idx > 0 {
+				lines = append(lines, cur[:idx+1])
+				cur = cur[idx+1:]
+			} else {
+				lines = append(lines, cur)
+				cur = ""
+			}
+		}
+		cur += string(r)
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return strings.Join(lines, "\n")
 }
