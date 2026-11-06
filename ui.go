@@ -20,12 +20,15 @@ import (
 // toolkit, no layout pass, no font fallback surprises.
 
 // msgRows is posted by the app when the index has been rebuilt.
-const msgRows = win.WM_APP + 50
+const (
+	msgRows      = win.WM_APP + 50
+	msgIconReady = win.WM_APP + 51
+)
 
 const (
-	uiPadding     = 18 // outer margin inside the window, 96 dpi units
+	uiPadding     = 16 // outer margin inside the window, 96 dpi units
 	uiRowHeight   = 60
-	uiFieldHeight = 72
+	uiFieldHeight = 40
 	uiIconSize    = 28
 	uiMaxRows     = 9
 	uiCorner      = 14
@@ -158,12 +161,12 @@ func (u *UI) show() {
 	}
 	u.rebuildFonts()
 	work := u.monitor.Work
-	u.width = u.scale(660)
+	u.width = u.scale(520)
 	if work.Width() < u.width+u.scale(40) {
 		u.width = work.Width() - u.scale(40)
 	}
-	if u.width < u.scale(380) {
-		u.width = u.scale(380)
+	if u.width < u.scale(360) {
+		u.width = u.scale(360)
 	}
 	u.setQuery("")
 	u.refreshRows(true)
@@ -232,7 +235,11 @@ func (u *UI) rebuildFonts() {
 }
 
 func (u *UI) resizeToContent() {
-	u.height = u.contentHeight()
+	h := u.contentHeight()
+	if h == u.height && u.width == u.scale(520) {
+		return
+	}
+	u.height = h
 	u.place()
 }
 
@@ -335,7 +342,7 @@ func (u *UI) rowForItem(it *index.Item) *Row {
 	if it.Description != "" {
 		sub = it.Description + "  ·  " + sub
 	}
-	return &Row{Title: it.Name, Sub: sub, Item: it, Icon: u.iconFor(it)}
+	return &Row{Title: it.Name, Sub: sub, Item: it, Icon: u.cachedIcon(it)}
 }
 
 // glyphIcon renders a short text glyph into an icon slot.
@@ -378,6 +385,10 @@ func (u *UI) wndProc(h win.HWND, msg uint32, wp, lp uintptr) uintptr {
 	case win.WM_DROPFILES:
 		u.onDrop(wp)
 		return 0
+	case msgIconReady:
+		u.applyIcons()
+		win.InvalidateRect(h, nil, false)
+		return 0
 	case msgRows:
 		u.refreshRows(false)
 		u.resizeToContent()
@@ -410,7 +421,7 @@ func (u *UI) wndProc(h win.HWND, msg uint32, wp, lp uintptr) uintptr {
 			u.monitor = m
 		}
 		work := u.monitor.Work
-		u.width = u.scale(660)
+		u.width = u.scale(520)
 		if work.Width() < u.width+u.scale(40) {
 			u.width = work.Width() - u.scale(40)
 		}
@@ -578,9 +589,8 @@ func (u *UI) paintQuery(dc win.HDC, r win.RECT) {
 	top := (r.Top + r.Bottom - lineH) / 2
 	width := r.Right - r.Left - u.scale(28)
 	if text == "" {
-		win.Text(dc, "Поиск программы или вычисление…", x, top, u.fontQuery, colDim, win.DT_LEFT, width)
 		if u.caretOn {
-			win.SolidRect(dc, win.Rect(x+u.scale(2), r.Top+u.scale(12), x+u.scale(4), r.Bottom-u.scale(12)), colAccent)
+			win.SolidRect(dc, win.Rect(x+u.scale(2), r.Top+u.scale(10), x+u.scale(4), r.Bottom-u.scale(10)), colDim)
 		}
 		return
 	}
@@ -590,7 +600,7 @@ func (u *UI) paintQuery(dc win.HDC, r win.RECT) {
 		w = width
 	}
 	if u.caretOn {
-		win.SolidRect(dc, win.Rect(x+w+u.scale(2), r.Top+u.scale(12), x+w+u.scale(4), r.Bottom-u.scale(12)), colAccent)
+		win.SolidRect(dc, win.Rect(x+w+u.scale(2), r.Top+u.scale(10), x+w+u.scale(4), r.Bottom-u.scale(10)), colDim)
 	}
 }
 
@@ -639,6 +649,22 @@ func (u *UI) paintRows(dc win.HDC, top, right, bottom int32) {
 	}
 }
 
+// applyIcons swaps the icons of the visible rows for the freshly loaded ones.
+// Called when msgIconReady arrives after a background shell extraction.
+func (u *UI) applyIcons() {
+	for _, r := range u.rows {
+		if r.Item == nil {
+			continue
+		}
+		key := strings.ToLower(r.Item.Path)
+		u.iconMu.Lock()
+		if m, ok := u.icons[key]; ok && m != nil {
+			r.Icon = m
+		}
+		u.iconMu.Unlock()
+	}
+}
+
 func (u *UI) paintFooter(dc win.HDC, right, bottom int32) {
 	foot := u.footerHeight()
 	if foot == 0 {
@@ -675,18 +701,39 @@ func (u *UI) flash(msg string) {
 
 // ---- icon cache ------------------------------------------------------------
 
-// iconFor returns the shell icon of a program. The shell keeps its own icon
-// cache, so asking it for a start menu entry costs a fraction of a
-// millisecond after the first time; the launcher keeps its rendered DIBs too
-// because alpha blending them is cheaper than re-rendering.
-func (u *UI) iconFor(it *index.Item) *win.MemDC {
+// cachedIcon returns the icon only when it is already in the cache. Missing
+// icons are extracted in the background and the window is repainted once they
+// arrive, so typing never blocks on the shell's icon loader.
+func (u *UI) cachedIcon(it *index.Item) *win.MemDC {
 	key := strings.ToLower(it.Path)
 	u.iconMu.Lock()
-	if m, ok := u.icons[key]; ok {
-		u.iconMu.Unlock()
+	m, ok := u.icons[key]
+	u.iconMu.Unlock()
+	if ok {
 		return m
 	}
+	u.queueIcon(it)
+	return nil
+}
+
+// queueIcon schedules the shell icon extraction of a program on a background
+// goroutine. The pending map dedupes work when the same path is shown again
+// on the next keystroke.
+func (u *UI) queueIcon(it *index.Item) {
+	key := strings.ToLower(it.Path)
+	u.iconMu.Lock()
+	if u.iconPending[key] {
+		u.iconMu.Unlock()
+		return
+	}
+	u.iconPending[key] = true
 	u.iconMu.Unlock()
+	go u.loadIcon(it, key)
+}
+
+// loadIcon extracts the icon off the UI thread and posts msgIconReady so the
+// window is repainted with it.
+func (u *UI) loadIcon(it *index.Item, key string) {
 	size := u.scale(uiIconSize)
 	m := win.FileIcon(it.Path, size, false)
 	if m == nil && it.Kind == index.KindShortcut {
@@ -699,13 +746,12 @@ func (u *UI) iconFor(it *index.Item) *win.MemDC {
 		m = u.glyphIcon(strings.ToUpper(firstLetter(it.Name)), colAccent)
 	}
 	u.iconMu.Lock()
-	if old, ok := u.icons[key]; ok {
-		u.iconMu.Unlock()
-		return old
-	}
+	delete(u.iconPending, key)
 	u.icons[key] = m
 	u.iconMu.Unlock()
-	return m
+	if u.app.keysToUI.Load() {
+		win.PostMessage(u.hwnd, msgIconReady, 0, 0)
+	}
 }
 
 func firstLetter(s string) string {
