@@ -522,10 +522,10 @@ func (u *UI) onMouseMove(lp uintptr) {
 	row := u.rowAt(y)
 	if row != u.hoverRow {
 		u.hoverRow = row
-		if row >= 0 && row < len(u.rows) && row != u.sel {
-			u.sel = row
-			win.InvalidateRect(u.hwnd, nil, false)
-		}
+		// The selection only changes on click or arrow keys, not on hover:
+		// otherwise scrolling with the wheel would drag the selection back to
+		// wherever the cursor happens to be.
+		win.InvalidateRect(u.hwnd, nil, false)
 	}
 }
 
@@ -577,6 +577,8 @@ func (u *UI) paint(h win.HWND) {
 	u.paintQuery(dc, field)
 	top := field.Bottom + u.scale(4)
 	u.paintRows(dc, top, int32(rect.Right), int32(rect.Bottom))
+	u.paintTooltip(dc, int32(rect.Right), int32(rect.Bottom))
+	u.paintScrollIndicator(dc, int32(rect.Right), int32(rect.Bottom))
 	u.paintFooter(dc, int32(rect.Right), int32(rect.Bottom))
 }
 
@@ -858,4 +860,69 @@ func keyToRune(vk uint32, shift bool) (rune, bool) {
 		return '/', true
 	}
 	return 0, false
+}
+
+// itoa formats a small integer without fmt in the paint path.
+func itoa(v int) string {
+	if v == 0 {
+		return "0"
+	}
+	neg := v < 0
+	if neg {
+		v = -v
+	}
+	var buf [12]byte
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
+
+// paintTooltip draws the full path of the program under the mouse cursor at
+// the bottom of the window, above the footer. It appears only while a result
+// is hovered, so the list stays uncluttered otherwise.
+func (u *UI) paintTooltip(dc win.HDC, right, bottom int32) {
+	if u.hoverRow < 0 || u.hoverRow >= len(u.rows) {
+		return
+	}
+	r := u.rows[u.hoverRow]
+	if r.Item == nil || r.Item.Path == "" {
+		return
+	}
+	pad := u.scale(uiPadding)
+	h := u.scale(24)
+	y := bottom - h - u.footerHeight()
+	win.SolidRect(dc, win.Rect(pad, y, right-pad, y+h), colField)
+	text := r.Item.Path
+	// Show the whole path; the subtitle font is small enough for the usual
+	// Program Files / Start Menu locations.
+	win.Text(dc, text, pad+u.scale(8), y+u.scale(3), u.fontSub, colDim, win.DT_LEFT,
+		right-pad*2-u.scale(16))
+}
+
+// paintScrollIndicator draws "current/total" at the bottom-right corner of the
+// result list, so the user knows where they are and how much is left to scroll.
+func (u *UI) paintScrollIndicator(dc win.HDC, right, bottom int32) {
+	if len(u.rows) == 0 {
+		return
+	}
+	total := len(u.rows)
+	current := u.sel + 1
+	if current < 1 {
+		current = 1
+	}
+	text := itoa(current) + "/" + itoa(total)
+	pad := u.scale(uiPadding)
+	h := u.scale(22)
+	w := u.scale(44)
+	x := right - pad - w
+	y := bottom - h - u.footerHeight()
+	win.Text(dc, text, x, y+u.scale(3), u.fontSub, colDim, win.DT_RIGHT, w)
 }
