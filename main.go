@@ -397,10 +397,40 @@ func (a *App) onHotkey(ev win.KeyEvent) bool {
 		win.VK_LMENU, win.VK_RMENU, win.VK_CAPITAL:
 		return false // modifiers are read from the tracked state
 	}
-	// The trigger key without the launcher owned keystrokes: swallow it too,
-	// otherwise the chord would leak into the window below.
+	// Only keys the launcher understands are swallowed; everything else -
+	// PrintScreen, function keys, multimedia, Pause - must reach the window
+	// below unchanged.
+	if !launcherHandlesKey(ev.VK) {
+		return false
+	}
 	a.post(umKey, uintptr(ev.VK), keyMods(a.mods))
 	return true
+}
+
+// launcherHandlesKey reports whether the launcher consumes a key while it is
+// open. Text input and navigation yes, global shortcuts (PrntScreen, F1..F24,
+// Pause, ...) no - they are passed through so screenshots and other hotkeys
+// keep working with the launcher open.
+func launcherHandlesKey(vk uint32) bool {
+	switch {
+	case vk >= 'A' && vk <= 'Z':
+		return true
+	case vk >= '0' && vk <= '9':
+		return true
+	case vk >= win.VK_NUMPAD0 && vk <= win.VK_NUMPAD0+9:
+		return true
+	}
+	switch vk {
+	case win.VK_SPACE, win.VK_RETURN, win.VK_ESCAPE, win.VK_BACK, win.VK_TAB,
+		win.VK_UP, win.VK_DOWN, win.VK_LEFT, win.VK_RIGHT, win.VK_HOME,
+		win.VK_END, win.VK_DELETE,
+		win.VK_OEM_MINUS, win.VK_OEM_PLUS, win.VK_OEM_COMMA, win.VK_OEM_PERIOD,
+		win.VK_OEM_1, win.VK_OEM_2, win.VK_OEM_3, win.VK_OEM_4, win.VK_OEM_5,
+		win.VK_OEM_6, win.VK_OEM_7,
+		win.VK_MULTIPLY, win.VK_ADD, win.VK_SUBTRACT, win.VK_DECIMAL, win.VK_DIVIDE:
+		return true
+	}
+	return false
 }
 
 // keyMods packs the modifier state for PostMessage: bit 0 ctrl, bit 1 alt,
