@@ -189,6 +189,53 @@ func TextInternalLeading(dc HDC, font HFONT) int32 {
 	return tm.InternalLeading
 }
 
+// TextMetrics returns the ascent, descent and internal leading of a font on a
+// DC. These are the numbers needed to centre a line by its baseline.
+type TextMetrics struct{ Ascent, Descent, InternalLeading int32 }
+
+func GetTextMetrics(dc HDC, font HFONT) TextMetrics {
+	var m TextMetrics
+	if dc == 0 || font == 0 {
+		return m
+	}
+	old := SelectObject(dc, HGDIOBJ(font))
+	defer SelectObject(dc, old)
+	var tm TEXTMETRICW
+	if r, _, _ := pGetTextMetricsW.Call(uintptr(dc), uintptr(unsafe.Pointer(&tm))); r != 0 {
+		m.Ascent, m.Descent, m.InternalLeading = tm.Ascent, tm.Descent, tm.InternalLeading
+	}
+	return m
+}
+
+// TextBaseline draws one line whose baseline is exactly at the given y. This
+// is the correct way to centre a line in a field: the caller places the
+// baseline, not the top of a line box.
+func TextBaseline(dc HDC, s string, x, baseline int32, font HFONT, color uint32, width int32) int32 {
+	if font == 0 || dc == 0 {
+		return x
+	}
+	text := s
+	if max := int(width / 8); width > 0 && len(text) > max {
+		text = text[:max]
+	}
+	units := syscall.StringToUTF16(text)
+	if len(units) > 0 && units[len(units)-1] == 0 {
+		units = units[:len(units)-1]
+	}
+	if len(units) == 0 {
+		return x
+	}
+	old := SelectObject(dc, HGDIOBJ(font))
+	oldColor, _, _ := pSetTextColor.Call(uintptr(dc), uintptr(color))
+	pSetBkMode.Call(uintptr(dc), TRANSPARENT)
+	pTextOutW.Call(uintptr(dc), uintptr(x), uintptr(baseline),
+		uintptr(unsafe.Pointer(&units[0])), uintptr(len(units)))
+	runtime.KeepAlive(units)
+	pSetTextColor.Call(uintptr(dc), oldColor)
+	SelectObject(dc, old)
+	return x + TextWidth(dc, text, font)
+}
+
 // TextHeight returns the cell height of the font.
 func TextHeight(dc HDC, font HFONT) int32 {
 	if dc == 0 || font == 0 {
