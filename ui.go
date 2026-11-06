@@ -584,23 +584,19 @@ func (u *UI) paintQuery(dc win.HDC, r win.RECT) {
 	text := u.text()
 	x := r.Left + u.scale(16)
 	width := r.Right - r.Left - u.scale(28)
-	tm := win.GetTextMetrics(dc, u.fontQuery)
-	// Centre the line by its baseline, not by a line box: with TextOutW the
-	// baseline is the one coordinate the system really uses, so placing it at
-	// the vertical centre of the field puts the glyphs exactly in the middle.
-	baseline := (r.Top+r.Bottom)/2 + (tm.Ascent-tm.Descent)/2
+	height := r.Bottom - r.Top
 	if text == "" {
 		if u.caretOn {
-			win.SolidRect(dc, win.Rect(x+u.scale(2), baseline-tm.Ascent, x+u.scale(4), baseline+tm.Descent), colDim)
+			win.SolidRect(dc, win.Rect(x+u.scale(2), r.Top+u.scale(8), x+u.scale(4), r.Bottom-u.scale(8)), colDim)
 		}
 		return
 	}
-	w := win.TextBaseline(dc, text, x, baseline, u.fontQuery, colText, width) - x
+	w := win.TextCentered(dc, text, x, r.Top, u.fontQuery, colText, width, height) - x
 	if w > width {
 		w = width
 	}
 	if u.caretOn {
-		win.SolidRect(dc, win.Rect(x+w+u.scale(2), baseline-tm.Ascent, x+w+u.scale(4), baseline+tm.Descent), colDim)
+		win.SolidRect(dc, win.Rect(x+w+u.scale(2), r.Top+u.scale(8), x+w+u.scale(4), r.Bottom-u.scale(8)), colDim)
 	}
 }
 

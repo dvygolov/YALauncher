@@ -236,6 +236,33 @@ func TextBaseline(dc HDC, s string, x, baseline int32, font HFONT, color uint32,
 	return x + TextWidth(dc, text, font)
 }
 
+// TextCentered draws one line vertically centred in the given rect using
+// DrawTextW with DT_VCENTER. DrawTextW lives in user32.dll, not gdi32, which
+// is why the original binding silently failed until the DLL was corrected.
+func TextCentered(dc HDC, s string, x, top int32, font HFONT, color uint32, width, height int32) int32 {
+	if font == 0 || dc == 0 {
+		return x
+	}
+	units := syscall.StringToUTF16(s)
+	if len(units) > 0 && units[len(units)-1] == 0 {
+		units = units[:len(units)-1]
+	}
+	if len(units) == 0 {
+		return x
+	}
+	old := SelectObject(dc, HGDIOBJ(font))
+	oldColor, _, _ := pSetTextColor.Call(uintptr(dc), uintptr(color))
+	pSetBkMode.Call(uintptr(dc), TRANSPARENT)
+	r := RECT{Left: x, Top: top, Right: x + width, Bottom: top + height}
+	pDrawTextW.Call(uintptr(dc), uintptr(unsafe.Pointer(&units[0])), ^uintptr(0),
+		uintptr(unsafe.Pointer(&r)), DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX)
+
+	runtime.KeepAlive(units)
+	pSetTextColor.Call(uintptr(dc), oldColor)
+	SelectObject(dc, old)
+	return x + TextWidth(dc, s, font)
+}
+
 // TextHeight returns the cell height of the font.
 func TextHeight(dc HDC, font HFONT) int32 {
 	if dc == 0 || font == 0 {
