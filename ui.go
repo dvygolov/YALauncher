@@ -93,6 +93,8 @@ type UI struct {
 	monitor     win.Monitor
 	hoverRow    int
 	mouseInside bool
+	mouseX      int32
+	mouseY      int32
 	caretOn     bool
 }
 
@@ -377,6 +379,9 @@ func (u *UI) wndProc(h win.HWND, msg uint32, wp, lp uintptr) uintptr {
 	case win.WM_LBUTTONDOWN:
 		u.onClick(lp)
 		return 0
+	case win.WM_RBUTTONUP:
+		u.onRightClick(lp)
+		return 0
 	case win.WM_MOUSELEAVE:
 		u.hoverRow = -1
 		u.mouseInside = false
@@ -519,6 +524,8 @@ func (u *UI) onMouseMove(lp uintptr) {
 		win.TrackMouseLeave(u.hwnd)
 	}
 	y := int32(int16(uint32(lp >> 16)))
+	u.mouseX = int32(int16(uint32(lp)))
+	u.mouseY = y
 	row := u.rowAt(y)
 	if row != u.hoverRow {
 		u.hoverRow = row
@@ -531,6 +538,8 @@ func (u *UI) onMouseMove(lp uintptr) {
 
 func (u *UI) onClick(lp uintptr) {
 	y := int32(int16(uint32(lp >> 16)))
+	u.mouseX = int32(int16(uint32(lp)))
+	u.mouseY = y
 	row := u.rowAt(y)
 	if row < 0 || row >= len(u.rows) {
 		return
@@ -886,28 +895,6 @@ func itoa(v int) string {
 	return string(buf[i:])
 }
 
-// paintTooltip draws the full path of the program under the mouse cursor at
-// the bottom of the window, above the footer. It appears only while a result
-// is hovered, so the list stays uncluttered otherwise.
-func (u *UI) paintTooltip(dc win.HDC, right, bottom int32) {
-	if u.hoverRow < 0 || u.hoverRow >= len(u.rows) {
-		return
-	}
-	r := u.rows[u.hoverRow]
-	if r.Item == nil || r.Item.Path == "" {
-		return
-	}
-	pad := u.scale(uiPadding)
-	h := u.scale(24)
-	y := bottom - h - u.footerHeight()
-	win.SolidRect(dc, win.Rect(pad, y, right-pad, y+h), colField)
-	text := r.Item.Path
-	// Show the whole path; the subtitle font is small enough for the usual
-	// Program Files / Start Menu locations.
-	win.Text(dc, text, pad+u.scale(8), y+u.scale(3), u.fontSub, colDim, win.DT_LEFT,
-		right-pad*2-u.scale(16))
-}
-
 // paintScrollIndicator draws "current/total" at the bottom-right corner of the
 // result list, so the user knows where they are and how much is left to scroll.
 func (u *UI) paintScrollIndicator(dc win.HDC, right, bottom int32) {
@@ -953,4 +940,70 @@ func (u *UI) paintScrollbar(dc win.HDC, top, right, bottom int32) {
 	x := right - u.scale(6)
 	win.SolidRect(dc, win.Rect(x, top, x+u.scale(3), bottom), colBorder)
 	win.SolidRect(dc, win.Rect(x, thumbY, x+u.scale(3), thumbY+thumbH), colDim)
+}
+
+// onRightClick opens the folder that contains the program (or the shortcut)
+// under the cursor, selecting the file in Explorer, then closes the launcher.
+func (u *UI) onRightClick(lp uintptr) {
+	y := int32(int16(uint32(lp >> 16)))
+	row := u.rowAt(y)
+	if row < 0 || row >= len(u.rows) {
+		return
+	}
+	r := u.rows[row]
+	if r.Item == nil {
+		return
+	}
+	win.ShowInFolder(r.Item.Path)
+	u.app.post(umHide, 0, 0)
+}
+
+// paintTooltip draws a floating tooltip next to the mouse cursor with the full
+// path of the hovered program. The tooltip is placed below and to the right of
+// the cursor, and moved left/up when it would leave the window.
+func (u *UI) paintTooltip(dc win.HDC, right, bottom int32) {
+	if u.hoverRow < 0 || u.hoverRow >= len(u.rows) {
+		return
+	}
+	r := u.rows[u.hoverRow]
+	if r.Item == nil || r.Item.Path == "" {
+		return
+	}
+	text := r.Item.Path
+	pad := u.scale(uiPadding)
+	maxW := right - pad*2 - u.mouseX - u.scale(20)
+	if maxW < u.scale(200) {
+		maxW = u.scale(200)
+	}
+	if maxW > u.scale(520) {
+		maxW = u.scale(520)
+	}
+	textW := win.TextWidth(dc, text, u.fontSub)
+	boxW := maxW
+	if textW+u.scale(20) < boxW {
+		boxW = textW + u.scale(20)
+	}
+	lines := 1
+	if textW > maxW-u.scale(20) {
+		lines = 2
+	}
+	boxH := u.scale(24) * int32(lines)
+	x := u.mouseX + u.scale(12)
+	y := u.mouseY + u.scale(18)
+	if x+boxW > right-pad {
+		x = right - pad - boxW
+	}
+	if y+boxH > bottom-u.footerHeight() {
+		y = u.mouseY - boxH - u.scale(8)
+	}
+	if x < pad {
+		x = pad
+	}
+	if y < pad {
+		y = pad
+	}
+	win.SolidRect(dc, win.Rect(x, y, x+boxW, y+boxH), colField)
+	win.SolidRect(dc, win.Rect(x, y, x+u.scale(2), y+boxH), colSelBar)
+	tr := win.Rect(x+u.scale(10), y+u.scale(4), x+boxW-u.scale(8), y+boxH)
+	win.TextWrapped(dc, text, &tr, u.fontSub, colText)
 }
