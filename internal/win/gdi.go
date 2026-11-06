@@ -407,3 +407,31 @@ func Cursor(id uintptr) uintptr {
 	r, _, _ := pLoadCursorW.Call(0, id)
 	return r
 }
+
+// TextOut is the thinnest possible wrapper over TextOutW: it takes the
+// baseline directly and does no arithmetic on it.
+func TextOut(dc HDC, s string, x, baseline int32, font HFONT, color uint32, width int32) int32 {
+	if font == 0 || dc == 0 {
+		return x
+	}
+	text := s
+	if max := int(width / 8); width > 0 && len(text) > max {
+		text = text[:max]
+	}
+	units := syscall.StringToUTF16(text)
+	if len(units) > 0 && units[len(units)-1] == 0 {
+		units = units[:len(units)-1]
+	}
+	if len(units) == 0 {
+		return x
+	}
+	old := SelectObject(dc, HGDIOBJ(font))
+	oldColor, _, _ := pSetTextColor.Call(uintptr(dc), uintptr(color))
+	pSetBkMode.Call(uintptr(dc), TRANSPARENT)
+	pTextOutW.Call(uintptr(dc), uintptr(x), uintptr(int(baseline)),
+		uintptr(unsafe.Pointer(&units[0])), uintptr(len(units)))
+	runtime.KeepAlive(units)
+	pSetTextColor.Call(uintptr(dc), oldColor)
+	SelectObject(dc, old)
+	return x + TextWidth(dc, text, font)
+}

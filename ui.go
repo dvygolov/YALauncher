@@ -584,14 +584,13 @@ func (u *UI) paintQuery(dc win.HDC, r win.RECT) {
 	text := u.text()
 	x := r.Left + u.scale(16)
 	width := r.Right - r.Left - u.scale(28)
-	height := r.Bottom - r.Top
 	if text == "" {
 		if u.caretOn {
 			win.SolidRect(dc, win.Rect(x+u.scale(2), r.Top+u.scale(8), x+u.scale(4), r.Bottom-u.scale(8)), colDim)
 		}
 		return
 	}
-	w := win.TextCentered(dc, text, x, r.Top, u.fontQuery, colText, width, height) - x
+	w := win.TextCentered(dc, text, x, r.Top, u.fontQuery, colText, width, r.Bottom-r.Top) - x
 	if w > width {
 		w = width
 	}
