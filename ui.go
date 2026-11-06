@@ -577,6 +577,7 @@ func (u *UI) paint(h win.HWND) {
 	u.paintQuery(dc, field)
 	top := field.Bottom + u.scale(4)
 	u.paintRows(dc, top, int32(rect.Right), int32(rect.Bottom))
+	u.paintScrollbar(dc, top, int32(rect.Right), int32(rect.Bottom))
 	u.paintTooltip(dc, int32(rect.Right), int32(rect.Bottom))
 	u.paintScrollIndicator(dc, int32(rect.Right), int32(rect.Bottom))
 	u.paintFooter(dc, int32(rect.Right), int32(rect.Bottom))
@@ -925,4 +926,31 @@ func (u *UI) paintScrollIndicator(dc win.HDC, right, bottom int32) {
 	x := right - pad - w
 	y := bottom - h - u.footerHeight()
 	win.Text(dc, text, x, y+u.scale(3), u.fontSub, colDim, win.DT_RIGHT, w)
+}
+
+// paintScrollbar draws a thin scrollbar on the right edge of the result list.
+// It appears only when there are more results than fit on screen; the thumb's
+// height and position are proportional to the visible slice.
+func (u *UI) paintScrollbar(dc win.HDC, top, right, bottom int32) {
+	total := len(u.rows)
+	if total <= uiMaxRows {
+		return
+	}
+	trackH := bottom - top
+	if trackH <= 0 {
+		return
+	}
+	visible := uiMaxRows
+	thumbH := int32(int64(trackH) * int64(visible) / int64(total))
+	if thumbH < u.scale(20) {
+		thumbH = u.scale(20)
+	}
+	scrollable := total - visible
+	if scrollable < 1 {
+		scrollable = 1
+	}
+	thumbY := top + int32(int64(trackH-thumbH)*int64(u.scroll)/int64(scrollable))
+	x := right - u.scale(6)
+	win.SolidRect(dc, win.Rect(x, top, x+u.scale(3), bottom), colBorder)
+	win.SolidRect(dc, win.Rect(x, thumbY, x+u.scale(3), thumbY+thumbH), colDim)
 }
