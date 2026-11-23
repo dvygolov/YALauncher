@@ -28,6 +28,7 @@ const (
 	appName     = "YALauncher"
 	windowClass = "YALauncherWnd"
 	mutexName   = `Local\YALauncherSingleInstance`
+	taskName    = "YALauncher"
 	repoURL     = "https://github.com/dvygolov/YALauncher"
 
 	// window messages sent to the hidden window
