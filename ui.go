@@ -4,7 +4,9 @@ package main
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -512,10 +514,12 @@ func (u *UI) activate(ctrl, shift bool) {
 	if r.Item == nil {
 		return
 	}
-	u.app.launch(r.Item, ctrl, shift)
+	// Close the window first, then start the program: the shell may take a
+	// moment to resolve a shortcut, and the launcher should not wait for it.
 	if !ctrl && !shift {
-		u.hide()
+		u.app.post(umHide, 0, 0)
 	}
+	u.app.launch(r.Item, ctrl, shift)
 }
 
 func (u *UI) onMouseMove(lp uintptr) {
@@ -692,6 +696,17 @@ func (u *UI) paintFooter(dc win.HDC, right, bottom int32) {
 // HWND_TOPMOST is the documented (HWND)-1 pseudo handle.
 var HWND_TOPMOST = ^uintptr(0)
 
+// prewarmIcons extracts every missing icon in the background, so the first
+// keystroke already finds most icons in memory. Called after a rescan.
+func (u *UI) prewarmIcons(ix *index.Index) {
+	if ix == nil {
+		return
+	}
+	for _, it := range ix.Items() {
+		u.cachedIcon(it)
+	}
+}
+
 // postRowsChanged asks the window to re-read the list, e.g. after a rescan.
 func (u *UI) postRowsChanged() {
 	if u.hwnd != 0 {
@@ -710,7 +725,9 @@ func (u *UI) flash(msg string) {
 
 // cachedIcon returns the icon only when it is already in the cache. Missing
 // icons are extracted in the background and the window is repainted once they
-// arrive, so typing never blocks on the shell's icon loader.
+// arrive, so typing never blocks on the shell's icon loader. The cache is
+// also persisted as PNG files under %APPDATA%\YALauncher\icons, so the next
+// start is instant too.
 func (u *UI) cachedIcon(it *index.Item) *win.MemDC {
 	key := strings.ToLower(it.Path)
 	u.iconMu.Lock()
@@ -719,8 +736,26 @@ func (u *UI) cachedIcon(it *index.Item) *win.MemDC {
 	if ok {
 		return m
 	}
+	if png := iconDiskPath(key); png != "" {
+		if m := win.LoadPNG(png); m != nil {
+			u.iconMu.Lock()
+			u.icons[key] = m
+			u.iconMu.Unlock()
+			return m
+		}
+	}
 	u.queueIcon(it)
 	return nil
+}
+
+// iconDiskPath returns the PNG path for a program's icon in the on-disk cache.
+func iconDiskPath(key string) string {
+	if key == "" {
+		return ""
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(key))
+	return filepath.Join(dataDir(), "icons", fmt.Sprintf("%016x.png", h.Sum64()))
 }
 
 // queueIcon schedules the shell icon extraction of a program on a background
@@ -751,6 +786,11 @@ func (u *UI) loadIcon(it *index.Item, key string) {
 	}
 	if m == nil {
 		m = u.glyphIcon(strings.ToUpper(firstLetter(it.Name)), colAccent)
+	}
+	if png := iconDiskPath(key); png != "" {
+		if err := os.MkdirAll(filepath.Dir(png), 0o755); err == nil {
+			_ = m.SavePNG(png)
+		}
 	}
 	u.iconMu.Lock()
 	delete(u.iconPending, key)

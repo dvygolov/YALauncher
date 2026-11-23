@@ -520,6 +520,7 @@ func (a *App) reindex(first bool) {
 	// repaint the list if the window is open while the scan was running
 	if a.ui != nil {
 		a.ui.postRowsChanged()
+		go a.ui.prewarmIcons(ix)
 	}
 }
 
