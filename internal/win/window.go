@@ -325,17 +325,10 @@ func ModuleFileName() string {
 
 // IsElevated reports whether the process runs with an elevated token.
 func IsElevated() bool {
-	var tok HANDLE
-	r, _, _ := pOpenProcessToken.Call(uintptr(CurrentProcess()), TOKEN_QUERY,
-		uintptr(unsafe.Pointer(&tok)))
-	if r == 0 {
-		return false
-	}
-	defer pCloseHandle.Call(uintptr(tok))
-	var elevated, retLen uint32
-	r, _, _ = pGetTokenInformation.Call(uintptr(tok), TokenElevation,
-		uintptr(unsafe.Pointer(&elevated)), 4, uintptr(unsafe.Pointer(&retLen)))
-	return r != 0 && elevated != 0
+	// IsUserAnAdmin returns non-zero when the process runs with administrator
+	// rights, including when it was started with "runas".
+	r, _, _ := pIsUserAnAdmin.Call()
+	return r != 0
 }
 
 // LocalFree releases memory returned by the shell (e.g. the file name list of

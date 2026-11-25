@@ -115,6 +115,14 @@ func main() {
 		case "--help", "-h", "/?":
 			win.MessageBox(helpText(), appName, win.MB_OK|win.MB_ICONINFORMATION)
 			return
+		case "--start-task":
+			// Logon flavour of autostart: only ask Task Scheduler to run
+			// the elevated task, then leave. Doing it before the elevation
+			// relaunch keeps logon free of a UAC prompt.
+			if err := startLogonTask(); err != nil {
+				logf("start: %v", err)
+			}
+			return
 		}
 	}
 
@@ -124,6 +132,18 @@ func main() {
 		logf("debug: keyboard trace enabled")
 	}
 	win.SetPerMonitorAware()
+
+	// A low level keyboard hook only sees keystrokes sent to elevated windows
+	// when this process itself is elevated. Relaunch as administrator so the
+	// hotkey works even when the focused window runs as admin.
+	if !win.IsElevated() && !hasArg(os.Args[1:], "--no-elevate") {
+		exe := win.ExePath()
+		if exe != "" && win.ShellExecute("runas", exe, "", filepath.Dir(exe), win.SW_SHOWNORMAL) {
+			logf("start: relaunched as administrator")
+			return
+		}
+		logf("start: elevation was cancelled, continuing without admin rights")
+	}
 
 	cfg, firstRun := loadConfig()
 	logf("start: %s %s (pid=%d, exe=%s)", appName, version, os.Getpid(), win.ExePath())

@@ -191,6 +191,11 @@ func pDwmSetWindowAttribute(attr int, hwnd HWND, value uintptr) {
 	pDwmSetWindowAttr.Call(uintptr(hwnd), uintptr(attr), value, 4)
 }
 
+// shell32 admin check
+var (
+	pIsUserAnAdmin = dllShell32.NewProc("IsUserAnAdmin")
+)
+
 // com
 var (
 	pCoInitializeEx   = dllOle32.NewProc("CoInitializeEx")
