@@ -133,6 +133,8 @@ func main() {
 	}
 	win.SetPerMonitorAware()
 
+	logf("start: pid=%d args=%v elevated=%v", os.Getpid(), os.Args[1:], win.IsElevated())
+
 	// A low level keyboard hook only sees keystrokes sent to elevated windows
 	// when this process itself is elevated. Relaunch as administrator so the
 	// hotkey works even when the focused window runs as admin.
